@@ -1,137 +1,216 @@
-console.log("LifePrice: Content script injected (v_assemble)."); // 1. Check if script loads
+console.log("LifePrice: Content script injected (v_hybrid).");
 
 let hourlyWage = null;
 const processedMark = "lifeprice-processed"; // Mark elements we've already handled
 const hoursSpanClass = "lifeprice-hours"; // Class for our added span
 
-// --- Price Finding Logic ---
-// Selector for the main price container element
-const priceContainerSelector = "span.a-price";
+// --- Generic Price Finding Logic (Original Regex Method) ---
+const genericPriceRegex =
+  /([\$£€])(\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?))/g;
 
-function calculateAndAppendHours(priceContainer) {
-  // 6. Check if this function is called for found elements
-  console.log(
-    "LifePrice: calculateAndAppendHours called for container:",
-    priceContainer
-  );
-
-  if (!hourlyWage || hourlyWage <= 0) {
-    console.log("LifePrice: Skipping - hourlyWage is null/zero.");
+function calculateAndAppendHours_Generic(node) {
+  if (!hourlyWage || hourlyWage <= 0 || node.nodeType !== Node.TEXT_NODE) {
+    return;
+  }
+  // IMPORTANT: Check if the parent OR ANY ancestor has been processed by EITHER method
+  if (node.parentElement?.closest(`.${processedMark}, .${hoursSpanClass}`)) {
+    // console.log("LifePrice (Generic): Skipping already processed node or parent:", node);
+    return;
+  }
+  // Avoid modifying text within script/style tags
+  const parentTag = node.parentElement?.tagName?.toUpperCase();
+  if (parentTag === "SCRIPT" || parentTag === "STYLE") {
     return;
   }
 
-  // Check if this container or an adjacent hours span already exists
+  const text = node.nodeValue;
+  let match;
+  let lastIndex = 0;
+  const fragments = document.createDocumentFragment();
+  let hasMatches = false;
+  genericPriceRegex.lastIndex = 0; // Reset regex state
+
+  while ((match = genericPriceRegex.exec(text)) !== null) {
+    const fullMatch = match[0];
+    const priceString = match[2].replace(/,/g, "");
+    const priceValue = parseFloat(priceString);
+
+    if (!isNaN(priceValue) && priceValue > 0) {
+      hasMatches = true;
+      const hours = (priceValue / hourlyWage).toFixed(1);
+      const hoursText = ` (${hours} hrs)`;
+
+      fragments.appendChild(
+        document.createTextNode(text.substring(lastIndex, match.index))
+      );
+
+      // Create a span to hold original price + hours, and mark it
+      const span = document.createElement("span");
+      span.className = processedMark; // Mark it so we don't process it again
+      span.appendChild(document.createTextNode(fullMatch)); // Original price text
+
+      const hoursNode = document.createTextNode(hoursText);
+      span.appendChild(hoursNode);
+
+      fragments.appendChild(span);
+      lastIndex = genericPriceRegex.lastIndex;
+
+      // Log success for generic method
+      console.log(
+        `LifePrice (Generic): Added "${hoursText}" to "${fullMatch}" in node:`,
+        node
+      );
+    }
+  }
+
+  if (hasMatches) {
+    fragments.appendChild(document.createTextNode(text.substring(lastIndex)));
+    try {
+      node.parentNode.replaceChild(fragments, node);
+    } catch (e) {
+      console.error("LifePrice (Generic): Error replacing text node:", e, node);
+    }
+  }
+}
+
+function scanForPrices_Generic(targetNode) {
+  console.log("LifePrice (Generic): Scanning text nodes in:", targetNode);
+  const walker = document.createTreeWalker(
+    targetNode,
+    NodeFilter.SHOW_TEXT,
+    null,
+    false
+  );
+  const nodesToProcess = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    const parentTag = node.parentElement?.tagName?.toUpperCase();
+    // Basic checks: avoid script/style, avoid already processed areas
+    if (
+      parentTag !== "SCRIPT" &&
+      parentTag !== "STYLE" &&
+      !node.parentElement?.closest(`.${processedMark}, .${hoursSpanClass}`)
+    ) {
+      // Additional check: Does the text likely contain a price pattern? Avoids processing huge chunks of text uselessly.
+      genericPriceRegex.lastIndex = 0; // Reset regex before test
+      if (genericPriceRegex.test(node.nodeValue)) {
+        nodesToProcess.push(node);
+      }
+    }
+  }
+  console.log(
+    `LifePrice (Generic): Found ${nodesToProcess.length} text nodes potentially containing prices.`
+  );
+  nodesToProcess.forEach(calculateAndAppendHours_Generic);
+}
+
+// --- Amazon Specific Price Finding Logic ---
+const amazonPriceExtractRegex =
+  /(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)/;
+const amazonPriceContainerSelector = "span.a-price"; // Target the container
+
+function calculateAndAppendHours_Amazon(priceContainer) {
+  if (!hourlyWage || hourlyWage <= 0) return;
   if (
     priceContainer.classList.contains(processedMark) ||
     priceContainer.nextElementSibling?.classList.contains(hoursSpanClass)
   ) {
-    // console.log("LifePrice: Skipping - already processed or hours span exists:", priceContainer); // Usually too noisy
     return;
   }
 
-  // Find the whole and fractional parts within this container
   const priceWholeEl = priceContainer.querySelector(".a-price-whole");
   const priceFractionEl = priceContainer.querySelector(".a-price-fraction");
+  let priceValue = NaN;
 
   if (priceWholeEl && priceFractionEl) {
-    const priceWholeText = priceWholeEl.textContent.trim().replace(/,/g, ""); // Remove commas
+    const priceWholeText = priceWholeEl.textContent.trim().replace(/,/g, "");
     const priceFractionText = priceFractionEl.textContent.trim();
-
-    // 7. Check the extracted parts
-    console.log(
-      `LifePrice: Found parts: whole="${priceWholeText}", fraction="${priceFractionText}"`
-    );
-
-    // Combine and parse
     const priceString = `${priceWholeText}.${priceFractionText}`;
-    const priceValue = parseFloat(priceString);
-
-    // 8. Check the parsed numeric value
+    priceValue = parseFloat(priceString);
     console.log(
-      `LifePrice: Assembled priceString: "${priceString}", Parsed priceValue: ${priceValue}`
+      `LifePrice (Amazon): Assembled price ${priceValue} from parts in:`,
+      priceContainer
     );
-
-    if (!isNaN(priceValue) && priceValue > 0) {
-      const hours = (priceValue / hourlyWage).toFixed(1); // Calculate hours
-      const hoursText = ` (${hours} hrs of life)`;
-      // 9. Check calculated hours
-      console.log(
-        `LifePrice: Calculated hours: ${hours} for price ${priceValue}`
-      );
-
-      // Create a new span for the hours text
-      const hoursSpan = document.createElement("span");
-      hoursSpan.textContent = hoursText;
-      hoursSpan.style.fontSize = "0.9em"; // Apply some styling
-      hoursSpan.style.marginLeft = "5px";
-      hoursSpan.style.color = "#555"; // Dark grey
-      hoursSpan.classList.add(hoursSpanClass); // Add class for potential future targeting/styling
-
-      // Insert the hours span *after* the main price container element
-      try {
-        priceContainer.insertAdjacentElement("afterend", hoursSpan);
-        // 10. Check if insertion happened
-        console.log("LifePrice: Inserted hoursSpan after:", priceContainer);
-        // Mark the main container as processed
-        priceContainer.classList.add(processedMark);
-      } catch (e) {
-        console.error(
-          "LifePrice: Error inserting hoursSpan:",
-          e,
-          "after element:",
+  } else {
+    // Fallback: Try the .a-offscreen if parts aren't found (covers some edge cases)
+    const offscreenEl = priceContainer.querySelector(".a-offscreen");
+    if (offscreenEl) {
+      const priceText = offscreenEl.textContent.trim();
+      const match = priceText.match(amazonPriceExtractRegex);
+      if (match && match[0]) {
+        priceValue = parseFloat(match[0].replace(/,/g, ""));
+        console.log(
+          `LifePrice (Amazon): Parsed price ${priceValue} from .a-offscreen in:`,
           priceContainer
         );
       }
-    } else {
+    }
+  }
+
+  if (!isNaN(priceValue) && priceValue > 0) {
+    const hours = (priceValue / hourlyWage).toFixed(1);
+    const hoursText = ` (${hours} hrs)`;
+    console.log(
+      `LifePrice (Amazon): Calculated hours: ${hours} for price ${priceValue}`
+    );
+
+    const hoursSpan = document.createElement("span");
+    hoursSpan.textContent = hoursText;
+    hoursSpan.style.fontSize = "0.9em";
+    hoursSpan.style.marginLeft = "5px";
+    hoursSpan.style.color = "#555";
+    hoursSpan.classList.add(hoursSpanClass); // Use specific class for hours
+
+    try {
+      priceContainer.insertAdjacentElement("afterend", hoursSpan);
       console.log(
-        `LifePrice: Skipping - Invalid parsed priceValue (${priceValue}) from parts.`
+        "LifePrice (Amazon): Inserted hoursSpan after:",
+        priceContainer
+      );
+      priceContainer.classList.add(processedMark); // Mark the container
+    } catch (e) {
+      console.error(
+        "LifePrice (Amazon): Error inserting hoursSpan:",
+        e,
+        "after element:",
+        priceContainer
       );
     }
   } else {
-    // Optional: Could add a fallback to check .a-offscreen here if parts aren't found
-    // console.log(`LifePrice: Skipping - Could not find .a-price-whole or .a-price-fraction inside:`, priceContainer);
+    // console.log("LifePrice (Amazon): Skipping - No valid price found in container:", priceContainer);
   }
 }
 
-// --- DOM Scanning and Observation ---
-function scanForPrices(targetNode) {
-  // 5. Check if scanForPrices is being called
-  console.log("LifePrice: Scanning for price containers in:", targetNode);
-
-  // Use querySelectorAll on the target node (or document) to find price elements
+function scanForPrices_Amazon(targetNode) {
+  console.log(
+    "LifePrice (Amazon): Scanning for price containers in:",
+    targetNode
+  );
   const scope =
     targetNode.nodeType === Node.ELEMENT_NODE ||
     targetNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE
       ? targetNode
       : document;
-
   try {
-    // Find elements matching the container selector within the scope
-    const priceContainers = scope.querySelectorAll(priceContainerSelector);
-    // 5b. Check if any elements are found by the selector
+    const priceContainers = scope.querySelectorAll(
+      amazonPriceContainerSelector
+    );
     console.log(
-      `LifePrice: Found ${priceContainers.length} elements with selector '${priceContainerSelector}' in scope:`,
+      `LifePrice (Amazon): Found ${priceContainers.length} elements with selector '${amazonPriceContainerSelector}' in scope:`,
       scope
     );
+    priceContainers.forEach(calculateAndAppendHours_Amazon);
 
-    priceContainers.forEach(calculateAndAppendHours);
-
-    // Also check if the targetNode itself matches (if it's an element being added)
-    // This handles cases where the '.a-price' element itself is added dynamically
     if (
       scope !== document &&
       typeof scope.matches === "function" &&
-      scope.matches(priceContainerSelector)
+      scope.matches(amazonPriceContainerSelector)
     ) {
-      console.log(
-        "LifePrice: Target node itself matches container selector:",
-        scope
-      );
-      calculateAndAppendHours(scope);
+      calculateAndAppendHours_Amazon(scope);
     }
   } catch (e) {
     console.error(
-      "LifePrice: Error during querySelectorAll or processing:",
+      "LifePrice (Amazon): Error during querySelectorAll or processing:",
       e,
       "on targetNode:",
       targetNode
@@ -139,39 +218,40 @@ function scanForPrices(targetNode) {
   }
 }
 
-// --- Initial run and Mutation Observer ---
+// --- Main Execution Logic ---
 function runLifePrice() {
-  console.log("LifePrice: runLifePrice called (v_assemble)."); // 4. Check if main execution starts
-  // Scan the initial document body
-  scanForPrices(document.body);
+  const hostname = window.location.hostname;
+  let scanFunction;
+  let isAmazon = hostname.includes("amazon."); // Basic check
 
-  // Observe changes in the DOM
+  if (isAmazon) {
+    console.log("LifePrice: Running Amazon-specific logic for:", hostname);
+    scanFunction = scanForPrices_Amazon;
+  } else {
+    console.log("LifePrice: Running generic logic for:", hostname);
+    scanFunction = scanForPrices_Generic;
+  }
+
+  // Initial scan
+  scanFunction(document.body);
+
+  // Observe changes - always use the chosen scan function
   const observer = new MutationObserver((mutationsList) => {
-    // 11. Check if MutationObserver is firing
-    // console.log(`LifePrice: MutationObserver detected ${mutationsList.length} mutations.`); // Can be very noisy
     let processedMutation = false;
     for (const mutation of mutationsList) {
       if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
         mutation.addedNodes.forEach((node) => {
-          if (
-            node.nodeType === Node.ELEMENT_NODE ||
-            node.nodeType === Node.DOCUMENT_FRAGMENT_NODE
-          ) {
-            // Check if the added node *is* a price container OR *contains* price containers
-            if (
-              (typeof node.matches === "function" &&
-                node.matches(priceContainerSelector)) ||
-              (typeof node.querySelector === "function" &&
-                node.querySelector(priceContainerSelector))
-            ) {
-              // 12. Check nodes being scanned by observer
-              console.log(
-                "LifePrice: Observer scanning node containing potential price:",
-                node
-              );
-              scanForPrices(node);
-              processedMutation = true;
-            }
+          // Scan any added element node, letting the scan function decide what to look for
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            // console.log("LifePrice: Observer scanning added node:", node); // Can be noisy
+            scanFunction(node);
+            processedMutation = true;
+          }
+          // Also handle fragments potentially containing relevant nodes
+          else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+            // console.log("LifePrice: Observer scanning added fragment:", node); // Can be noisy
+            scanFunction(node);
+            processedMutation = true;
           }
         });
       }
@@ -179,24 +259,23 @@ function runLifePrice() {
     // if (processedMutation) { console.log("LifePrice: Finished processing relevant mutations."); }
   });
 
-  // Start observing the body for added nodes and subtree changes
   observer.observe(document.body, {
     childList: true,
     subtree: true,
   });
-  console.log("LifePrice: MutationObserver started (v_assemble).");
+  console.log("LifePrice: MutationObserver started.");
 }
 
 // --- Initialization ---
-console.log(
-  "LifePrice: Attempting to get hourlyWage from storage (v_assemble)."
-); // 2. Check storage access
+console.log("LifePrice: Attempting to get hourlyWage from storage (v_hybrid).");
 chrome.storage.sync.get(["hourlyWage"], function (result) {
-  console.log("LifePrice: Storage get callback. Result:", result); // 3. Check value retrieved
+  console.log("LifePrice: Storage get callback. Result:", result);
   if (result.hourlyWage && result.hourlyWage > 0) {
     hourlyWage = result.hourlyWage;
-    console.log(`LifePrice: Hourly wage loaded: ${hourlyWage}`);
-    // Adding a slight delay can sometimes help ensure the page's own JS has settled
+    console.log(
+      `LifePrice: Hourly wage loaded: ${hourlyWage}. Starting runLifePrice.`
+    );
+    // Use a timeout to slightly delay execution, allowing page JS to settle
     setTimeout(runLifePrice, 500);
   } else {
     console.warn(
@@ -215,11 +294,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
       console.log(
         `LifePrice: Storage changed. New wage: ${hourlyWage}. Refresh page recommended.`
       );
+      // Note: This doesn't automatically update existing prices on the page.
     } else {
       hourlyWage = null;
       console.log("LifePrice: Storage changed. Wage removed or invalid.");
     }
   }
 });
-
 // --- End of content.js ---
