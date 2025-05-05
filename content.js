@@ -1,8 +1,34 @@
-console.log("LifePrice: Content script injected (v_hybrid).");
+console.log("LifePrice: Content script injected (v_hybrid_time_format).");
 
 let hourlyWage = null;
 const processedMark = "lifeprice-processed"; // Mark elements we've already handled
 const hoursSpanClass = "lifeprice-hours"; // Class for our added span
+
+// --- Formatting Helper ---
+function formatTimeCost(priceValue, wage) {
+  if (wage <= 0) return ""; // Prevent division by zero or negative wage
+
+  const timeInHours = priceValue / wage;
+
+  if (timeInHours >= 1) {
+    // Display in hours (e.g., 1.5 hrs)
+    const hours = timeInHours.toFixed(1);
+    const unit = hours === "1.0" ? "hr" : "hrs";
+    return `${hours} ${unit}`;
+  } else if (timeInHours >= 1 / 60) {
+    // Display in minutes (e.g., 45 min)
+    const minutes = Math.round(timeInHours * 60);
+    const unit = minutes === 1 ? "min" : "mins";
+    return `${minutes} ${unit}`;
+  } else {
+    // Display in seconds (e.g., 30 sec)
+    const seconds = Math.round(timeInHours * 60 * 60);
+    // Only show seconds if it's greater than 0, otherwise it looks weird (e.g., 0 sec)
+    if (seconds <= 0) return "";
+    const unit = seconds === 1 ? "sec" : "secs";
+    return `${seconds} ${unit}`;
+  }
+}
 
 // --- Generic Price Finding Logic (Original Regex Method) ---
 const genericPriceRegex =
@@ -36,30 +62,32 @@ function calculateAndAppendHours_Generic(node) {
     const priceValue = parseFloat(priceString);
 
     if (!isNaN(priceValue) && priceValue > 0) {
-      hasMatches = true;
-      const hours = (priceValue / hourlyWage).toFixed(1);
-      const hoursText = ` (${hours} hrs)`;
+      const formattedTime = formatTimeCost(priceValue, hourlyWage);
+      const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
 
-      fragments.appendChild(
-        document.createTextNode(text.substring(lastIndex, match.index))
-      );
+      if (timeText) {
+        hasMatches = true;
+        fragments.appendChild(
+          document.createTextNode(text.substring(lastIndex, match.index))
+        );
 
-      // Create a span to hold original price + hours, and mark it
-      const span = document.createElement("span");
-      span.className = processedMark; // Mark it so we don't process it again
-      span.appendChild(document.createTextNode(fullMatch)); // Original price text
+        // Create a span to hold original price + time, and mark it
+        const span = document.createElement("span");
+        span.className = processedMark; // Mark it so we don't process it again
+        span.appendChild(document.createTextNode(fullMatch)); // Original price text
 
-      const hoursNode = document.createTextNode(hoursText);
-      span.appendChild(hoursNode);
+        const timeNode = document.createTextNode(timeText);
+        span.appendChild(timeNode);
 
-      fragments.appendChild(span);
-      lastIndex = genericPriceRegex.lastIndex;
+        fragments.appendChild(span);
+        lastIndex = genericPriceRegex.lastIndex;
 
-      // Log success for generic method
-      console.log(
-        `LifePrice (Generic): Added "${hoursText}" to "${fullMatch}" in node:`,
-        node
-      );
+        // Log success for generic method
+        console.log(
+          `LifePrice (Generic): Added "${timeText}" to "${fullMatch}" in node:`,
+          node
+        );
+      }
     }
   }
 
@@ -148,33 +176,36 @@ function calculateAndAppendHours_Amazon(priceContainer) {
   }
 
   if (!isNaN(priceValue) && priceValue > 0) {
-    const hours = (priceValue / hourlyWage).toFixed(1);
-    const hoursText = ` (${hours} hrs)`;
-    console.log(
-      `LifePrice (Amazon): Calculated hours: ${hours} for price ${priceValue}`
-    );
+    const formattedTime = formatTimeCost(priceValue, hourlyWage);
+    const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
 
-    const hoursSpan = document.createElement("span");
-    hoursSpan.textContent = hoursText;
-    hoursSpan.style.fontSize = "0.9em";
-    hoursSpan.style.marginLeft = "5px";
-    hoursSpan.style.color = "#555";
-    hoursSpan.classList.add(hoursSpanClass); // Use specific class for hours
-
-    try {
-      priceContainer.insertAdjacentElement("afterend", hoursSpan);
+    if (timeText) {
       console.log(
-        "LifePrice (Amazon): Inserted hoursSpan after:",
-        priceContainer
+        `LifePrice (Amazon): Calculated time: ${timeText} for price ${priceValue}`
       );
-      priceContainer.classList.add(processedMark); // Mark the container
-    } catch (e) {
-      console.error(
-        "LifePrice (Amazon): Error inserting hoursSpan:",
-        e,
-        "after element:",
-        priceContainer
-      );
+
+      const hoursSpan = document.createElement("span");
+      hoursSpan.textContent = timeText;
+      hoursSpan.style.fontSize = "0.9em";
+      hoursSpan.style.marginLeft = "5px";
+      hoursSpan.style.color = "#555";
+      hoursSpan.classList.add(hoursSpanClass); // Use specific class for time
+
+      try {
+        priceContainer.insertAdjacentElement("afterend", hoursSpan);
+        console.log(
+          "LifePrice (Amazon): Inserted hoursSpan after:",
+          priceContainer
+        );
+        priceContainer.classList.add(processedMark); // Mark the container
+      } catch (e) {
+        console.error(
+          "LifePrice (Amazon): Error inserting hoursSpan:",
+          e,
+          "after element:",
+          priceContainer
+        );
+      }
     }
   } else {
     // console.log("LifePrice (Amazon): Skipping - No valid price found in container:", priceContainer);
@@ -267,7 +298,9 @@ function runLifePrice() {
 }
 
 // --- Initialization ---
-console.log("LifePrice: Attempting to get hourlyWage from storage (v_hybrid).");
+console.log(
+  "LifePrice: Attempting to get hourlyWage from storage (v_hybrid_time_format)."
+);
 chrome.storage.sync.get(["hourlyWage"], function (result) {
   console.log("LifePrice: Storage get callback. Result:", result);
   if (result.hourlyWage && result.hourlyWage > 0) {
