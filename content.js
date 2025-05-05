@@ -299,8 +299,31 @@ function scanForPrices_Amazon(targetNode) {
   }
 }
 
+// --- New Function: Clear Existing Spans ---
+function clearExistingTimeSpans() {
+  // Remove all time cost spans added by this extension
+  document
+    .querySelectorAll(`.${hoursSpanClass}`)
+    .forEach((span) => span.remove());
+  // Remove the processed mark from elements to allow reprocessing
+  document
+    .querySelectorAll(`.${processedMark}`)
+    .forEach((el) => el.classList.remove(processedMark));
+}
+
+// Store the observer instance so we can disconnect/reconnect if needed
+let pageObserver = null;
+
 // --- Main Execution Logic ---
 function runLifePrice() {
+  // Disconnect previous observer if running (e.g., during wage update)
+  if (pageObserver) {
+    pageObserver.disconnect();
+    pageObserver = null;
+  }
+  // Clear existing time spans before re-running
+  clearExistingTimeSpans();
+
   const hostname = window.location.hostname;
   let scanFunction;
   let isAmazon = hostname.includes("amazon."); // Basic check
@@ -312,10 +335,17 @@ function runLifePrice() {
   }
 
   // Initial scan
-  scanFunction(document.body);
+  if (hourlyWage && hourlyWage > 0) {
+    // Only scan if wage is valid
+    scanFunction(document.body);
+  }
 
   // Observe changes - always use the chosen scan function for childList
   const observer = new MutationObserver((mutationsList) => {
+    // Prevent processing if wage is not set
+    if (!hourlyWage || hourlyWage <= 0) return;
+
+    // Basic re-entrancy guard (keep existing one)
     if (observer.isProcessing) return;
     observer.isProcessing = true;
 
@@ -333,7 +363,33 @@ function runLifePrice() {
             node.nodeType === Node.ELEMENT_NODE &&
             node.closest(`.${processedMark}`)
           ) {
-            return; // Skip nodes added inside already marked parents (handled by characterData)
+            // If the node is added *inside* a marked container,
+            // AND it's an Amazon site, we might need to re-evaluate the container
+            // This addresses cases where Amazon replaces price parts internally.
+            if (isAmazon) {
+              const amazonContainer = node.closest(
+                amazonPriceContainerSelector
+              );
+              if (
+                amazonContainer &&
+                amazonContainer.classList.contains(processedMark)
+              ) {
+                // Remove old span, remove mark, re-process container
+                const oldSpan = amazonContainer.nextElementSibling;
+                if (oldSpan && oldSpan.classList.contains(hoursSpanClass)) {
+                  oldSpan.remove();
+                }
+                amazonContainer.classList.remove(processedMark);
+                calculateAndAppendHours_Amazon(amazonContainer);
+              } else if (
+                node.matches &&
+                node.matches(amazonPriceContainerSelector)
+              ) {
+                // If the added node *is* the container itself
+                scanFunction(node);
+              }
+            }
+            return; // Skip other nodes inside already marked containers
           }
 
           if (
@@ -350,27 +406,49 @@ function runLifePrice() {
                 node
               );
             }
+          } else if (node.nodeType === Node.TEXT_NODE && !isAmazon) {
+            // If a text node is added directly, try processing its parent immediately
+            // This might happen in some frameworks
+            calculateAndAppendHours_Generic(node);
           }
         });
       }
       // Handle text changes within existing nodes (for price updates)
       else if (mutation.type === "characterData") {
-        // Call the specific update function for the text node that changed
-        if (!isAmazon && mutation.target.nodeType === Node.TEXT_NODE) {
-          // Only apply to generic logic for now
-          // Add a check to avoid processing changes within our own spans
+        // Add a check to avoid processing changes within our own spans
+        if (mutation.target.parentElement?.classList.contains(hoursSpanClass)) {
+          continue; // Skip changes within our spans
+        }
+
+        // Check for Amazon price changes
+        if (isAmazon) {
+          const amazonContainer = mutation.target.parentElement?.closest(
+            amazonPriceContainerSelector
+          );
+          // Check if the change happened within a *processed* Amazon container
           if (
-            !mutation.target.parentElement?.classList.contains(hoursSpanClass)
+            amazonContainer &&
+            amazonContainer.classList.contains(processedMark)
           ) {
-            updateTimeCostForTextNode(mutation.target);
+            // Re-evaluate this specific Amazon container
+            const oldSpan = amazonContainer.nextElementSibling;
+            if (oldSpan && oldSpan.classList.contains(hoursSpanClass)) {
+              oldSpan.remove(); // Remove old span first
+            }
+            amazonContainer.classList.remove(processedMark); // Unmark
+            calculateAndAppendHours_Amazon(amazonContainer); // Re-process
           }
+        }
+        // Handle Generic price changes (only if not handled by Amazon logic above)
+        else if (mutation.target.nodeType === Node.TEXT_NODE) {
+          updateTimeCostForTextNode(mutation.target);
         }
       }
     }
     observer.isProcessing = false;
   });
 
-  observer.isProcessing = false;
+  observer.isProcessing = false; // Initialize flag
 
   observer.observe(document.body, {
     childList: true,
@@ -378,33 +456,57 @@ function runLifePrice() {
     characterData: true, // <-- Enable characterData observation
     characterDataOldValue: false, // We don't need the old value
   });
+
+  // Store the observer instance so we can disconnect/reconnect if needed
+  pageObserver = observer;
 }
 
 // --- Initialization ---
 
-chrome.storage.sync.get(["hourlyWage"], function (result) {
-  if (result.hourlyWage && result.hourlyWage > 0) {
-    hourlyWage = result.hourlyWage;
-    // Use a timeout to slightly delay execution, allowing page JS to settle
-    setTimeout(runLifePrice, 500);
-  } else {
-    console.warn(
-      "LifePrice: Hourly wage not set or invalid in storage. Value:",
-      result.hourlyWage
-    );
-  }
-});
+function initialize() {
+  chrome.storage.sync.get(["hourlyWage"], function (result) {
+    if (result.hourlyWage && result.hourlyWage > 0) {
+      hourlyWage = result.hourlyWage;
+      // Use a timeout to slightly delay execution, allowing page JS to settle
+      setTimeout(runLifePrice, 500);
+    } else {
+      console.warn(
+        "LifePrice: Hourly wage not set or invalid in storage. Value:",
+        result.hourlyWage
+      );
+      // Optional: Clear any existing spans if wage becomes invalid/unset
+      clearExistingTimeSpans();
+    }
+  });
+}
 
 // --- Storage Change Listener ---
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === "sync" && changes.hourlyWage) {
     const newWage = changes.hourlyWage.newValue;
+    const oldWage = changes.hourlyWage.oldValue;
+
+    console.log("LifePrice: Wage changed from", oldWage, "to", newWage);
+
     if (newWage && newWage > 0) {
       hourlyWage = newWage;
-      // Note: This doesn't automatically update existing prices on the page.
+      // Re-run the main logic to update the page
+      // Use timeout to prevent potential rapid firing / race conditions
+      setTimeout(runLifePrice, 100); // Short delay before updating UI
     } else {
       hourlyWage = null;
+      // If wage is removed or invalid, clear the time spans from the page
+      clearExistingTimeSpans();
+      // Optional: Disconnect observer if wage is invalid
+      if (pageObserver) {
+        pageObserver.disconnect();
+        pageObserver = null;
+      }
     }
   }
 });
+
+// --- Initial Run ---
+initialize();
+
 // --- End of content.js ---
