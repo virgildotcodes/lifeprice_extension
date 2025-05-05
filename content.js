@@ -30,34 +30,43 @@ function formatTimeCost(priceValue, wage) {
   }
 }
 
-// --- Generic Price Finding Logic (Original Regex Method) ---
+// --- Generic Price Finding Logic (Revised: Insert-After Method) ---
 const genericPriceRegex =
-  /([\$£€])(\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?))/g;
+  /([\$£€])(\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?))/; // Keep regex simple for finding price
 
-function calculateAndAppendHours_Generic(node) {
-  if (!hourlyWage || hourlyWage <= 0 || node.nodeType !== Node.TEXT_NODE) {
-    return;
-  }
-  // IMPORTANT: Check if the parent OR ANY ancestor has been processed by EITHER method
-  if (node.parentElement?.closest(`.${processedMark}, .${hoursSpanClass}`)) {
-    // console.log("LifePrice (Generic): Skipping already processed node or parent:", node);
-    return;
-  }
-  // Avoid modifying text within script/style tags
-  const parentTag = node.parentElement?.tagName?.toUpperCase();
-  if (parentTag === "SCRIPT" || parentTag === "STYLE") {
+function calculateAndAppendHours_Generic(textNode) {
+  if (!hourlyWage || hourlyWage <= 0 || textNode.nodeType !== Node.TEXT_NODE) {
     return;
   }
 
-  const text = node.nodeValue;
-  let match;
-  let lastIndex = 0;
-  const fragments = document.createDocumentFragment();
-  let hasMatches = false;
+  const parentElement = textNode.parentElement;
+  if (!parentElement) return;
+
+  // Check if the PARENT element is already processed or has a time span adjacent
+  if (
+    parentElement.classList.contains(processedMark) ||
+    parentElement.nextElementSibling?.classList.contains(hoursSpanClass)
+  ) {
+    // console.log("LifePrice (Generic): Skipping - Parent already processed or has time span:", parentElement);
+    return;
+  }
+
+  // Avoid modifying text within script/style tags, or our own spans
+  const parentTag = parentElement.tagName?.toUpperCase();
+  if (
+    parentTag === "SCRIPT" ||
+    parentTag === "STYLE" ||
+    parentElement.classList.contains(hoursSpanClass)
+  ) {
+    return;
+  }
+
+  const text = textNode.nodeValue;
   genericPriceRegex.lastIndex = 0; // Reset regex state
+  const match = genericPriceRegex.exec(text); // Find the first price in the text node
 
-  while ((match = genericPriceRegex.exec(text)) !== null) {
-    const fullMatch = match[0];
+  if (match) {
+    const fullMatch = match[0]; // e.g., "$20 (14 mins of your life)"
     const priceString = match[2].replace(/,/g, "");
     const priceValue = parseFloat(priceString);
 
@@ -66,69 +75,87 @@ function calculateAndAppendHours_Generic(node) {
       const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
 
       if (timeText) {
-        hasMatches = true;
-        fragments.appendChild(
-          document.createTextNode(text.substring(lastIndex, match.index))
-        );
-
-        // Create a span to hold original price + time, and mark it
-        const span = document.createElement("span");
-        span.className = processedMark; // Mark it so we don't process it again
-        span.appendChild(document.createTextNode(fullMatch)); // Original price text
-
-        const timeNode = document.createTextNode(timeText);
-        span.appendChild(timeNode);
-
-        fragments.appendChild(span);
-        lastIndex = genericPriceRegex.lastIndex;
-
-        // Log success for generic method
         console.log(
-          `LifePrice (Generic): Added "${timeText}" to "${fullMatch}" in node:`,
-          node
+          `LifePrice (Generic): Found price "${fullMatch}" in parent:`,
+          parentElement,
+          `Calculated time: ${timeText}`
         );
-      }
-    }
-  }
 
-  if (hasMatches) {
-    fragments.appendChild(document.createTextNode(text.substring(lastIndex)));
-    try {
-      node.parentNode.replaceChild(fragments, node);
-    } catch (e) {
-      console.error("LifePrice (Generic): Error replacing text node:", e, node);
+        const hoursSpan = document.createElement("span");
+        hoursSpan.textContent = timeText;
+        hoursSpan.style.fontSize = "0.9em"; // Consistent styling
+        hoursSpan.style.marginLeft = "5px";
+        hoursSpan.style.color = "#555"; // Consistent styling
+        hoursSpan.classList.add(hoursSpanClass); // Use specific class for time span
+
+        try {
+          // Insert the time span AFTER the parent element containing the text node
+          parentElement.insertAdjacentElement("afterend", hoursSpan);
+          parentElement.classList.add(processedMark); // Mark the PARENT element
+          console.log(
+            "LifePrice (Generic): Inserted hoursSpan after:",
+            parentElement
+          );
+        } catch (e) {
+          console.error(
+            "LifePrice (Generic): Error inserting hoursSpan:",
+            e,
+            "after element:",
+            parentElement
+          );
+        }
+        // Since we marked the parent, we don't need to worry about other text nodes inside it triggering this again.
+      }
     }
   }
 }
 
 function scanForPrices_Generic(targetNode) {
-  console.log("LifePrice (Generic): Scanning text nodes in:", targetNode);
+  // console.log("LifePrice (Generic): Scanning text nodes in:", targetNode); // Less noisy logging
   const walker = document.createTreeWalker(
     targetNode,
     NodeFilter.SHOW_TEXT,
-    null,
+    {
+      acceptNode: function (node) {
+        // Initial coarse filter: Parent exists, not in SCRIPT/STYLE, doesn't look like our own span's text
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        const parentTag = parent.tagName?.toUpperCase();
+        if (
+          parentTag === "SCRIPT" ||
+          parentTag === "STYLE" ||
+          parent.classList.contains(hoursSpanClass) ||
+          parent.classList.contains(processedMark) || // Don't walk children of already marked parents
+          parent.closest(`.${hoursSpanClass}`) // Don't process text inside our spans
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        // Quick check for potential price symbols + digits
+        if (node.nodeValue && /[$\£€]\s?\d/.test(node.nodeValue)) {
+          // Further check: ensure parent isn't already marked or has span adjacent
+          if (
+            parent.classList.contains(processedMark) ||
+            parent.nextElementSibling?.classList.contains(hoursSpanClass)
+          ) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_REJECT; // Skip nodes unlikely to contain prices
+      },
+    },
     false
   );
+
   const nodesToProcess = [];
   let node;
   while ((node = walker.nextNode())) {
-    const parentTag = node.parentElement?.tagName?.toUpperCase();
-    // Basic checks: avoid script/style, avoid already processed areas
-    if (
-      parentTag !== "SCRIPT" &&
-      parentTag !== "STYLE" &&
-      !node.parentElement?.closest(`.${processedMark}, .${hoursSpanClass}`)
-    ) {
-      // Additional check: Does the text likely contain a price pattern? Avoids processing huge chunks of text uselessly.
-      genericPriceRegex.lastIndex = 0; // Reset regex before test
-      if (genericPriceRegex.test(node.nodeValue)) {
-        nodesToProcess.push(node);
-      }
-    }
+    // The filter ensures we only get relevant text nodes whose parents aren't marked/styled
+    nodesToProcess.push(node);
   }
-  console.log(
-    `LifePrice (Generic): Found ${nodesToProcess.length} text nodes potentially containing prices.`
-  );
+
+  // console.log(`LifePrice (Generic): Found ${nodesToProcess.length} text nodes potentially containing prices.`); // Less noisy logging
+  // Process nodes. The calculate function now handles marking the parent.
   nodesToProcess.forEach(calculateAndAppendHours_Generic);
 }
 
@@ -264,35 +291,90 @@ function runLifePrice() {
   }
 
   // Initial scan
+  console.log("LifePrice: Initial scan starting.");
   scanFunction(document.body);
+  console.log("LifePrice: Initial scan finished.");
 
   // Observe changes - always use the chosen scan function
   const observer = new MutationObserver((mutationsList) => {
+    // Use a flag to prevent re-entry if processing causes mutations synchronously
+    if (observer.isProcessing) return;
+    observer.isProcessing = true; // Set flag
+
+    // console.log(`LifePrice: MutationObserver triggered (${mutationsList.length} mutations)`); // Debug log
     let processedMutation = false;
     for (const mutation of mutationsList) {
       if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
         mutation.addedNodes.forEach((node) => {
-          // Scan any added element node, letting the scan function decide what to look for
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            // console.log("LifePrice: Observer scanning added node:", node); // Can be noisy
-            scanFunction(node);
-            processedMutation = true;
+          // Avoid scanning nodes added by our extension
+          if (
+            node.nodeType === Node.ELEMENT_NODE &&
+            node.classList?.contains(hoursSpanClass)
+          ) {
+            // console.log("LifePrice: Observer skipping added hoursSpan:", node);
+            return;
           }
-          // Also handle fragments potentially containing relevant nodes
-          else if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-            // console.log("LifePrice: Observer scanning added fragment:", node); // Can be noisy
-            scanFunction(node);
-            processedMutation = true;
+          // Also avoid scanning inside already processed containers if node is added there
+          if (
+            node.nodeType === Node.ELEMENT_NODE &&
+            node.closest(`.${processedMark}`)
+          ) {
+            // console.log("LifePrice: Observer skipping node added inside processedMark container:", node);
+            return;
+          }
+
+          // Scan any added element node or fragment
+          if (
+            node.nodeType === Node.ELEMENT_NODE ||
+            node.nodeType === Node.DOCUMENT_FRAGMENT_NODE
+          ) {
+            // console.log("LifePrice: Observer scanning added node/fragment:", node); // Can be noisy
+            try {
+              scanFunction(node);
+              processedMutation = true;
+            } catch (e) {
+              console.error(
+                "LifePrice: Error during observer scanFunction call:",
+                e,
+                "on node:",
+                node
+              );
+            }
           }
         });
       }
+      // OPTIONAL: Handle characterData mutations if needed (e.g., price changes within an existing text node)
+      // else if (mutation.type === 'characterData') {
+      //     // Be VERY careful here, as this triggers often.
+      //     // Check if the mutation target's parent is relevant and not processed.
+      //     const targetNode = mutation.target;
+      //     if (targetNode.nodeType === Node.TEXT_NODE) {
+      //         // console.log("LifePrice: Observer processing characterData mutation:", targetNode);
+      //         // Re-run the generic check on this specific text node's parent context
+      //         // Ensure it's not inside our spans or already processed parents
+      //         if (!targetNode.parentElement?.closest(`.${processedMark}, .${hoursSpanClass}`)) {
+      //               genericPriceRegex.lastIndex = 0; // Reset regex
+      //               if (genericPriceRegex.test(targetNode.nodeValue)) {
+      //                   calculateAndAppendHours_Generic(targetNode); // Re-evaluate this specific node
+      //                   processedMutation = true;
+      //               }
+      //         }
+      //     }
+      // }
     }
     // if (processedMutation) { console.log("LifePrice: Finished processing relevant mutations."); }
+
+    // Clear the flag after processing this batch of mutations
+    observer.isProcessing = false; // Reset flag
   });
+
+  // Add the isProcessing property to the observer instance
+  observer.isProcessing = false;
 
   observer.observe(document.body, {
     childList: true,
     subtree: true,
+    // characterData: true // OPTIONAL: Add if needed, but increases load significantly
   });
   console.log("LifePrice: MutationObserver started.");
 }
