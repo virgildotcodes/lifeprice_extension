@@ -29,6 +29,87 @@
             font-size: 0.9em;
             color: green;
         }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+            margin-right: 10px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            margin: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 20px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.toggle-slider {
+            background-color: #2196F3;
+        }
+
+        input:checked+.toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        .color-input {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .color-input label {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .color-input input[type="text"] {
+            width: 70px;
+            margin-bottom: 0;
+        }
+
+        .color-preview {
+            width: 20px;
+            height: 20px;
+            margin-left: 5px;
+            border: 1px solid #ccc;
+        }
+
+        .custom-message {
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 
@@ -36,6 +117,40 @@
     <h3>LifePrice Settings</h3>
     <label for="wage">Your Hourly Wage:</label>
     <input type="number" id="wage" placeholder="e.g., 15.50" step="0.01" min="0.01">
+
+    <div class="toggle-container">
+        <label class="toggle-switch">
+            <input type="checkbox" id="showLifeText" checked>
+            <span class="toggle-slider"></span>
+        </label>
+        <span>Show message text</span>
+    </div>
+
+    <div class="custom-message">
+        <label for="customMessage">Custom message:</label>
+        <input type="text" id="customMessage" placeholder="of your life" value="of your life">
+        <small style="display: block; color: #666; margin-top: 3px;">Example: "2.5 hrs <i>of your life</i>"</small>
+    </div>
+
+    <h4>Appearance</h4>
+    <div class="color-input">
+        <label for="textColor">Text Color:</label>
+        <input type="text" id="textColor" placeholder="#ffffff" value="white">
+        <div class="color-preview" id="textColorPreview"></div>
+    </div>
+
+    <div class="color-input">
+        <label for="bgColor">Background Color:</label>
+        <input type="text" id="bgColor" placeholder="#000000" value="black">
+        <div class="color-preview" id="bgColorPreview"></div>
+    </div>
+
+    <div class="color-input">
+        <label for="borderColor">Border Color:</label>
+        <input type="text" id="borderColor" placeholder="#ffffff" value="white">
+        <div class="color-preview" id="borderColorPreview"></div>
+    </div>
+
     <button id="save">Save</button>
     <div id="status"></div>
 

@@ -1,6 +1,37 @@
 let hourlyWage = null;
+let showLifeText = true; // Default to true
+let customMessage = "of your life"; // Default message
+let textColor = "white"; // Default text color
+let bgColor = "black"; // Default background color
+let borderColor = "white"; // Default border color
 const processedMark = "lifeprice-processed"; // Mark elements we've already handled
 const hoursSpanClass = "lifeprice-hours"; // Class for our added span
+
+// Create and append the styles for our elements
+function addStyles() {
+  // Remove any existing styles first to prevent duplicates
+  const existingStyle = document.getElementById("lifeprice-styles");
+  if (existingStyle) {
+    existingStyle.remove();
+  }
+
+  const styleEl = document.createElement("style");
+  styleEl.id = "lifeprice-styles";
+  styleEl.textContent = `
+    .${hoursSpanClass} {
+      font-size: 0.9em;
+      margin-left: 5px;
+      background-color: ${bgColor};
+      color: ${textColor};
+      padding: 2px 5px;
+      border-radius: 15px;
+      box-shadow: 0 0 0 1px ${borderColor};
+      max-height: fit-content;
+      align-self: center;
+    }
+  `;
+  document.head.appendChild(styleEl);
+}
 
 // --- Formatting Helper ---
 function formatTimeCost(priceValue, wage) {
@@ -72,7 +103,9 @@ function updateTimeCostForTextNode(textNode) {
 
     if (!isNaN(priceValue) && priceValue > 0) {
       const formattedTime = formatTimeCost(priceValue, hourlyWage);
-      timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
+      timeText = formattedTime
+        ? ` ${formattedTime}${showLifeText ? ` ${customMessage}` : ""}`
+        : "";
     }
   }
 
@@ -136,14 +169,13 @@ function calculateAndAppendHours_Generic(textNode) {
 
     if (!isNaN(priceValue) && priceValue > 0) {
       const formattedTime = formatTimeCost(priceValue, hourlyWage);
-      const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
+      const timeText = formattedTime
+        ? ` ${formattedTime}${showLifeText ? ` ${customMessage}` : ""}`
+        : "";
 
       if (timeText) {
         const hoursSpan = document.createElement("span");
         hoursSpan.textContent = timeText;
-        hoursSpan.style.fontSize = "0.9em"; // Consistent styling
-        hoursSpan.style.marginLeft = "5px";
-        hoursSpan.style.color = "#555"; // Consistent styling
         hoursSpan.classList.add(hoursSpanClass); // Use specific class for time span
 
         try {
@@ -214,6 +246,8 @@ const amazonPriceContainerSelector = "span.a-price"; // Target the container
 
 function calculateAndAppendHours_Amazon(priceContainer) {
   if (!hourlyWage || hourlyWage <= 0) return;
+
+  // If already processed, skip to avoid duplicates
   if (
     priceContainer.classList.contains(processedMark) ||
     priceContainer.nextElementSibling?.classList.contains(hoursSpanClass)
@@ -221,52 +255,38 @@ function calculateAndAppendHours_Amazon(priceContainer) {
     return;
   }
 
-  const priceWholeEl = priceContainer.querySelector(".a-price-whole");
-  const priceFractionEl = priceContainer.querySelector(".a-price-fraction");
-  let priceValue = NaN;
+  // Extract all text content to find price
+  let priceText = priceContainer.textContent || "";
 
-  if (priceWholeEl && priceFractionEl) {
-    const priceWholeText = priceWholeEl.textContent.trim().replace(/,/g, "");
-    const priceFractionText = priceFractionEl.textContent.trim();
-    const priceString = `${priceWholeText}.${priceFractionText}`;
-    priceValue = parseFloat(priceString);
-  } else {
-    // Fallback: Try the .a-offscreen if parts aren't found (covers some edge cases)
-    const offscreenEl = priceContainer.querySelector(".a-offscreen");
-    if (offscreenEl) {
-      const priceText = offscreenEl.textContent.trim();
-      const match = priceText.match(amazonPriceExtractRegex);
-      if (match && match[0]) {
-        priceValue = parseFloat(match[0].replace(/,/g, ""));
+  // Clean up price text (remove commas, extra spaces, etc.)
+  priceText = priceText.replace(/[^0-9\.\$£€\s]/g, "").trim();
+
+  // Use regex to find price value
+  const match = /[\$£€]\s?(\d+(?:\.\d{1,2})?)/.exec(priceText);
+
+  if (match && match[1]) {
+    const priceValue = parseFloat(match[1]);
+
+    if (!isNaN(priceValue) && priceValue > 0) {
+      const formattedTime = formatTimeCost(priceValue, hourlyWage);
+      const timeText = formattedTime
+        ? ` ${formattedTime}${showLifeText ? ` ${customMessage}` : ""}`
+        : "";
+
+      if (timeText) {
+        const hoursSpan = document.createElement("span");
+        hoursSpan.textContent = timeText;
+        hoursSpan.classList.add(hoursSpanClass);
+
+        try {
+          // Insert after price container
+          priceContainer.insertAdjacentElement("afterend", hoursSpan);
+          priceContainer.classList.add(processedMark);
+        } catch (e) {
+          console.error("LifePrice (Amazon): Error inserting hoursSpan:", e);
+        }
       }
     }
-  }
-
-  if (!isNaN(priceValue) && priceValue > 0) {
-    const formattedTime = formatTimeCost(priceValue, hourlyWage);
-    const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
-
-    if (timeText) {
-      const hoursSpan = document.createElement("span");
-      hoursSpan.textContent = timeText;
-      hoursSpan.style.fontSize = "0.9em";
-      hoursSpan.style.marginLeft = "5px";
-      hoursSpan.style.color = "#555";
-      hoursSpan.classList.add(hoursSpanClass); // Use specific class for time
-
-      try {
-        priceContainer.insertAdjacentElement("afterend", hoursSpan);
-        priceContainer.classList.add(processedMark); // Mark the container
-      } catch (e) {
-        console.error(
-          "LifePrice (Amazon): Error inserting hoursSpan:",
-          e,
-          "after element:",
-          priceContainer
-        );
-      }
-    }
-  } else {
   }
 }
 
@@ -462,46 +482,117 @@ function runLifePrice() {
 }
 
 // --- Initialization ---
-
 function initialize() {
-  chrome.storage.sync.get(["hourlyWage"], function (result) {
-    if (result.hourlyWage && result.hourlyWage > 0) {
-      hourlyWage = result.hourlyWage;
-      // Use a timeout to slightly delay execution, allowing page JS to settle
-      setTimeout(runLifePrice, 500);
-    } else {
-      console.warn(
-        "LifePrice: Hourly wage not set or invalid in storage. Value:",
-        result.hourlyWage
-      );
-      // Optional: Clear any existing spans if wage becomes invalid/unset
-      clearExistingTimeSpans();
+  chrome.storage.sync.get(
+    [
+      "hourlyWage",
+      "showLifeText",
+      "customMessage",
+      "textColor",
+      "bgColor",
+      "borderColor",
+    ],
+    function (result) {
+      if (result.hourlyWage && result.hourlyWage > 0) {
+        hourlyWage = result.hourlyWage;
+        // Set showLifeText from storage, default to true if not set
+        showLifeText =
+          result.showLifeText !== undefined ? result.showLifeText : true;
+
+        // Set custom message from storage or use default
+        customMessage = result.customMessage || "of your life";
+
+        // Set color values from storage or use defaults
+        textColor = result.textColor || "white";
+        bgColor = result.bgColor || "black";
+        borderColor = result.borderColor || "white";
+
+        // Add styles with the current color settings
+        addStyles();
+
+        // Use a timeout to slightly delay execution, allowing page JS to settle
+        setTimeout(runLifePrice, 500);
+      } else {
+        console.warn(
+          "LifePrice: Hourly wage not set or invalid in storage. Value:",
+          result.hourlyWage
+        );
+        // Optional: Clear any existing spans if wage becomes invalid/unset
+        clearExistingTimeSpans();
+      }
     }
-  });
+  );
 }
 
 // --- Storage Change Listener ---
 chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === "sync" && changes.hourlyWage) {
-    const newWage = changes.hourlyWage.newValue;
-    const oldWage = changes.hourlyWage.oldValue;
+  if (namespace === "sync") {
+    let shouldRerun = false;
+    let stylesChanged = false;
 
-    console.log("LifePrice: Wage changed from", oldWage, "to", newWage);
+    // Handle wage changes
+    if (changes.hourlyWage) {
+      const newWage = changes.hourlyWage.newValue;
+      const oldWage = changes.hourlyWage.oldValue;
 
-    if (newWage && newWage > 0) {
-      hourlyWage = newWage;
-      // Re-run the main logic to update the page
+      console.log("LifePrice: Wage changed from", oldWage, "to", newWage);
+
+      if (newWage && newWage > 0) {
+        hourlyWage = newWage;
+        shouldRerun = true;
+      } else {
+        hourlyWage = null;
+        // If wage is removed or invalid, clear the time spans from the page
+        clearExistingTimeSpans();
+        // Optional: Disconnect observer if wage is invalid
+        if (pageObserver) {
+          pageObserver.disconnect();
+          pageObserver = null;
+        }
+      }
+    }
+
+    // Handle showLifeText changes
+    if (changes.showLifeText) {
+      const newShowLifeText = changes.showLifeText.newValue;
+      console.log("LifePrice: 'Show life text' changed to", newShowLifeText);
+      showLifeText = newShowLifeText;
+      shouldRerun = true;
+    }
+
+    // Handle custom message changes
+    if (changes.customMessage) {
+      const newCustomMessage = changes.customMessage.newValue;
+      console.log("LifePrice: Custom message changed to", newCustomMessage);
+      customMessage = newCustomMessage;
+      shouldRerun = true;
+    }
+
+    // Handle color changes
+    if (changes.textColor) {
+      textColor = changes.textColor.newValue;
+      stylesChanged = true;
+    }
+
+    if (changes.bgColor) {
+      bgColor = changes.bgColor.newValue;
+      stylesChanged = true;
+    }
+
+    if (changes.borderColor) {
+      borderColor = changes.borderColor.newValue;
+      stylesChanged = true;
+    }
+
+    // Update styles if any colors changed
+    if (stylesChanged) {
+      addStyles();
+    }
+
+    // Re-run if settings changed and we have a valid wage
+    if ((shouldRerun || stylesChanged) && hourlyWage && hourlyWage > 0) {
       // Use timeout to prevent potential rapid firing / race conditions
       setTimeout(runLifePrice, 100); // Short delay before updating UI
-    } else {
-      hourlyWage = null;
-      // If wage is removed or invalid, clear the time spans from the page
-      clearExistingTimeSpans();
-      // Optional: Disconnect observer if wage is invalid
-      if (pageObserver) {
-        pageObserver.disconnect();
-        pageObserver = null;
-      }
     }
   }
 });
