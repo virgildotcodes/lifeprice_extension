@@ -1,5 +1,3 @@
-console.log("LifePrice: Content script injected (v_hybrid_time_format).");
-
 let hourlyWage = null;
 const processedMark = "lifeprice-processed"; // Mark elements we've already handled
 const hoursSpanClass = "lifeprice-hours"; // Class for our added span
@@ -43,7 +41,6 @@ function updateTimeCostForTextNode(textNode) {
   const parentElement = textNode.parentElement;
   // Only proceed if the parent element EXISTS and WAS previously processed by us
   if (!parentElement || !parentElement.classList.contains(processedMark)) {
-    // console.log("LifePrice (Update): Skipping - Parent not found or not marked:", parentElement);
     return;
   }
 
@@ -81,10 +78,8 @@ function updateTimeCostForTextNode(textNode) {
 
   // Update or remove the existing span
   if (timeText) {
-    // console.log(`LifePrice (Update): Updating time for "${match[0]}" to "${timeText}" for node:`, textNode);
     existingHoursSpan.textContent = timeText;
   } else {
-    // console.log("LifePrice (Update): Removing time span as price is no longer valid in:", textNode);
     try {
       existingHoursSpan.remove();
       // Optional: We could remove the processedMark from the parent too,
@@ -116,7 +111,6 @@ function calculateAndAppendHours_Generic(textNode) {
     parentElement.classList.contains(processedMark) ||
     parentElement.nextElementSibling?.classList.contains(hoursSpanClass)
   ) {
-    // console.log("LifePrice (Generic Initial): Skipping - Parent already processed or has time span:", parentElement);
     return;
   }
   // --- End of change ---
@@ -145,12 +139,6 @@ function calculateAndAppendHours_Generic(textNode) {
       const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
 
       if (timeText) {
-        // console.log( // Less noisy logging
-        //   `LifePrice (Generic Initial): Found price "${fullMatch}" in parent:`,
-        //   parentElement,
-        //   `Calculated time: ${timeText}`
-        // );
-
         const hoursSpan = document.createElement("span");
         hoursSpan.textContent = timeText;
         hoursSpan.style.fontSize = "0.9em"; // Consistent styling
@@ -162,10 +150,6 @@ function calculateAndAppendHours_Generic(textNode) {
           // Insert the time span AFTER the parent element containing the text node
           parentElement.insertAdjacentElement("afterend", hoursSpan);
           parentElement.classList.add(processedMark); // Mark the PARENT element
-          // console.log( // Less noisy logging
-          //   "LifePrice (Generic Initial): Inserted hoursSpan after:",
-          //   parentElement
-          // );
         } catch (e) {
           console.error(
             "LifePrice (Generic Initial): Error inserting hoursSpan:",
@@ -180,7 +164,6 @@ function calculateAndAppendHours_Generic(textNode) {
 }
 
 function scanForPrices_Generic(targetNode) {
-  // console.log("LifePrice (Generic): Scanning text nodes in:", targetNode); // Less noisy logging
   const walker = document.createTreeWalker(
     targetNode,
     NodeFilter.SHOW_TEXT,
@@ -221,7 +204,6 @@ function scanForPrices_Generic(targetNode) {
   while ((node = walker.nextNode())) {
     nodesToProcess.push(node);
   }
-  // console.log(`LifePrice (Generic): Found ${nodesToProcess.length} text nodes potentially containing prices.`); // Less noisy logging
   nodesToProcess.forEach(calculateAndAppendHours_Generic); // Only does initial insertions now
 }
 
@@ -248,10 +230,6 @@ function calculateAndAppendHours_Amazon(priceContainer) {
     const priceFractionText = priceFractionEl.textContent.trim();
     const priceString = `${priceWholeText}.${priceFractionText}`;
     priceValue = parseFloat(priceString);
-    console.log(
-      `LifePrice (Amazon): Assembled price ${priceValue} from parts in:`,
-      priceContainer
-    );
   } else {
     // Fallback: Try the .a-offscreen if parts aren't found (covers some edge cases)
     const offscreenEl = priceContainer.querySelector(".a-offscreen");
@@ -260,10 +238,6 @@ function calculateAndAppendHours_Amazon(priceContainer) {
       const match = priceText.match(amazonPriceExtractRegex);
       if (match && match[0]) {
         priceValue = parseFloat(match[0].replace(/,/g, ""));
-        console.log(
-          `LifePrice (Amazon): Parsed price ${priceValue} from .a-offscreen in:`,
-          priceContainer
-        );
       }
     }
   }
@@ -273,10 +247,6 @@ function calculateAndAppendHours_Amazon(priceContainer) {
     const timeText = formattedTime ? ` (${formattedTime} of your life)` : "";
 
     if (timeText) {
-      console.log(
-        `LifePrice (Amazon): Calculated time: ${timeText} for price ${priceValue}`
-      );
-
       const hoursSpan = document.createElement("span");
       hoursSpan.textContent = timeText;
       hoursSpan.style.fontSize = "0.9em";
@@ -286,10 +256,6 @@ function calculateAndAppendHours_Amazon(priceContainer) {
 
       try {
         priceContainer.insertAdjacentElement("afterend", hoursSpan);
-        console.log(
-          "LifePrice (Amazon): Inserted hoursSpan after:",
-          priceContainer
-        );
         priceContainer.classList.add(processedMark); // Mark the container
       } catch (e) {
         console.error(
@@ -301,15 +267,10 @@ function calculateAndAppendHours_Amazon(priceContainer) {
       }
     }
   } else {
-    // console.log("LifePrice (Amazon): Skipping - No valid price found in container:", priceContainer);
   }
 }
 
 function scanForPrices_Amazon(targetNode) {
-  console.log(
-    "LifePrice (Amazon): Scanning for price containers in:",
-    targetNode
-  );
   const scope =
     targetNode.nodeType === Node.ELEMENT_NODE ||
     targetNode.nodeType === Node.DOCUMENT_FRAGMENT_NODE
@@ -318,10 +279,6 @@ function scanForPrices_Amazon(targetNode) {
   try {
     const priceContainers = scope.querySelectorAll(
       amazonPriceContainerSelector
-    );
-    console.log(
-      `LifePrice (Amazon): Found ${priceContainers.length} elements with selector '${amazonPriceContainerSelector}' in scope:`,
-      scope
     );
     priceContainers.forEach(calculateAndAppendHours_Amazon);
 
@@ -349,17 +306,13 @@ function runLifePrice() {
   let isAmazon = hostname.includes("amazon."); // Basic check
 
   if (isAmazon) {
-    console.log("LifePrice: Running Amazon-specific logic for:", hostname);
     scanFunction = scanForPrices_Amazon;
   } else {
-    console.log("LifePrice: Running generic logic for:", hostname);
     scanFunction = scanForPrices_Generic;
   }
 
   // Initial scan
-  console.log("LifePrice: Initial scan starting.");
   scanFunction(document.body);
-  console.log("LifePrice: Initial scan finished.");
 
   // Observe changes - always use the chosen scan function for childList
   const observer = new MutationObserver((mutationsList) => {
@@ -409,7 +362,6 @@ function runLifePrice() {
           if (
             !mutation.target.parentElement?.classList.contains(hoursSpanClass)
           ) {
-            // console.log("LifePrice: Observer detected characterData change:", mutation.target); // Can be noisy
             updateTimeCostForTextNode(mutation.target);
           }
         }
@@ -426,20 +378,13 @@ function runLifePrice() {
     characterData: true, // <-- Enable characterData observation
     characterDataOldValue: false, // We don't need the old value
   });
-  console.log("LifePrice: MutationObserver started (including characterData).");
 }
 
 // --- Initialization ---
-console.log(
-  "LifePrice: Attempting to get hourlyWage from storage (v_hybrid_time_format)."
-);
+
 chrome.storage.sync.get(["hourlyWage"], function (result) {
-  console.log("LifePrice: Storage get callback. Result:", result);
   if (result.hourlyWage && result.hourlyWage > 0) {
     hourlyWage = result.hourlyWage;
-    console.log(
-      `LifePrice: Hourly wage loaded: ${hourlyWage}. Starting runLifePrice.`
-    );
     // Use a timeout to slightly delay execution, allowing page JS to settle
     setTimeout(runLifePrice, 500);
   } else {
@@ -456,13 +401,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     const newWage = changes.hourlyWage.newValue;
     if (newWage && newWage > 0) {
       hourlyWage = newWage;
-      console.log(
-        `LifePrice: Storage changed. New wage: ${hourlyWage}. Refresh page recommended.`
-      );
       // Note: This doesn't automatically update existing prices on the page.
     } else {
       hourlyWage = null;
-      console.log("LifePrice: Storage changed. Wage removed or invalid.");
     }
   }
 });
